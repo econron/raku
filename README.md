@@ -168,7 +168,7 @@ The watcher uses this GitHub search condition for each configured repository:
 review-requested:@me
 ```
 
-On macOS, `raku` sends desktop notifications via `osascript`. If desktop notification support is unavailable, it falls back to stdout.
+On macOS, `raku` sends desktop notifications via `osascript` and speaks `PRレビューのリクエストが来てます` with `say`. If desktop notification support is unavailable, it falls back to stdout.
 
 The same active review request is not notified repeatedly. Once a request disappears, it is removed from state, so a future re-request can notify again.
 

@@ -15,6 +15,12 @@ type ReviewRequestNotifier struct {
 	Writer io.Writer
 }
 
+const reviewRequestVoiceMessage = "PRレビューのリクエストが来てます"
+
+var runCommand = func(ctx context.Context, name string, args ...string) error {
+	return exec.CommandContext(ctx, name, args...).Run()
+}
+
 func (n ReviewRequestNotifier) NotifyReviewRequest(ctx context.Context, request domain.ReviewRequest) error {
 	if runtime.GOOS == "darwin" {
 		if _, err := exec.LookPath("osascript"); err == nil {
@@ -38,7 +44,15 @@ func notifyDarwin(ctx context.Context, request domain.ReviewRequest) error {
 		escapeAppleScript(title),
 		escapeAppleScript(subtitle),
 	)
-	return exec.CommandContext(ctx, "osascript", "-e", script).Run()
+	if err := runCommand(ctx, "osascript", "-e", script); err != nil {
+		return err
+	}
+	_ = speakReviewRequest(ctx)
+	return nil
+}
+
+func speakReviewRequest(ctx context.Context) error {
+	return runCommand(ctx, "say", reviewRequestVoiceMessage)
 }
 
 func (n ReviewRequestNotifier) notifyFallback(request domain.ReviewRequest) error {
