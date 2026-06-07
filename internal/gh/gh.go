@@ -214,6 +214,46 @@ func (c *Client) PullRequest(ctx context.Context) (domain.PR, error) {
 	}, nil
 }
 
+func (c *Client) ReviewRequests(ctx context.Context, repo string) ([]domain.ReviewRequest, error) {
+	out, err := c.run(
+		ctx,
+		"pr", "list",
+		"--repo", repo,
+		"--state", "open",
+		"--search", "review-requested:@me",
+		"--limit", "100",
+		"--json", "number,title,url,author,updatedAt,isDraft",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var raw []reviewRequestPR
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, err
+	}
+
+	requests := make([]domain.ReviewRequest, 0, len(raw))
+	for _, pr := range raw {
+		requests = append(requests, domain.ReviewRequest{
+			Repo:      repo,
+			Number:    pr.Number,
+			Title:     pr.Title,
+			URL:       pr.URL,
+			Author:    pr.Author.Login,
+			UpdatedAt: pr.UpdatedAt,
+			IsDraft:   pr.IsDraft,
+		})
+	}
+	sort.SliceStable(requests, func(i, j int) bool {
+		if requests[i].Repo == requests[j].Repo {
+			return requests[i].Number < requests[j].Number
+		}
+		return requests[i].Repo < requests[j].Repo
+	})
+	return requests, nil
+}
+
 func (c *Client) Events(ctx context.Context, prNumber int, viewer string, includeSelf bool) ([]domain.Event, error) {
 	issueComments, err := c.issueComments(ctx, prNumber, viewer, includeSelf)
 	if err != nil {
@@ -491,6 +531,15 @@ type issueComment struct {
 	HTMLURL   string `json:"html_url"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+}
+
+type reviewRequestPR struct {
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Author    user   `json:"author"`
+	UpdatedAt string `json:"updatedAt"`
+	IsDraft   bool   `json:"isDraft"`
 }
 
 type reviewComment struct {

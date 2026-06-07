@@ -15,6 +15,7 @@ type File struct {
 	Version     int                             `json:"version"`
 	Seen        map[string]map[string]SeenEntry `json:"seen"`
 	CurrentView map[string]CurrentView          `json:"current_view"`
+	Watch       WatchState                      `json:"watch"`
 }
 
 type SeenEntry struct {
@@ -31,6 +32,19 @@ type ViewItem struct {
 	Alias       int    `json:"alias"`
 	Key         string `json:"key"`
 	Fingerprint string `json:"fingerprint"`
+}
+
+type WatchState struct {
+	ReviewRequests map[string]WatchReviewRequestEntry `json:"review_requests"`
+}
+
+type WatchReviewRequestEntry struct {
+	Repo       string `json:"repo"`
+	Number     int    `json:"number"`
+	Title      string `json:"title"`
+	URL        string `json:"url"`
+	UpdatedAt  string `json:"updated_at"`
+	NotifiedAt string `json:"notified_at"`
 }
 
 type Store struct {
@@ -165,5 +179,8 @@ func (f *File) normalize() {
 	}
 	if f.CurrentView == nil {
 		f.CurrentView = map[string]CurrentView{}
+	}
+	if f.Watch.ReviewRequests == nil {
+		f.Watch.ReviewRequests = map[string]WatchReviewRequestEntry{}
 	}
 }

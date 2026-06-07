@@ -74,6 +74,18 @@ func TestEventsNormalizesAndExcludesViewer(t *testing.T) {
 	if events[1].Location == nil || events[1].Location.Line == nil || *events[1].Location.Line != 87 {
 		t.Fatalf("review comment location not normalized: %#v", events[1].Location)
 	}
+	if events[1].Location.CommitID != "1111111111111111111111111111111111111111" {
+		t.Fatalf("commit_id %q", events[1].Location.CommitID)
+	}
+	if events[1].Location.OriginalCommitID != "2222222222222222222222222222222222222222" {
+		t.Fatalf("original_commit_id %q", events[1].Location.OriginalCommitID)
+	}
+	if events[1].Location.OriginalLine == nil || *events[1].Location.OriginalLine != 80 {
+		t.Fatalf("original_line not normalized: %#v", events[1].Location.OriginalLine)
+	}
+	if events[2].CommitID != "3333333333333333333333333333333333333333" {
+		t.Fatalf("review commit_id %q", events[2].CommitID)
+	}
 }
 
 func TestEventsIncludesViewerWhenRequested(t *testing.T) {
@@ -101,6 +113,38 @@ func TestEventsIncludesViewerWhenRequested(t *testing.T) {
 	}
 }
 
+func TestReviewRequests(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(fakeRunner{
+		"pr list --repo owner/repo --state open --search review-requested:@me --limit 100 --json number,title,url,author,updatedAt,isDraft": []byte(`[
+  {
+    "number": 12,
+    "title": "Need review",
+    "url": "https://github.com/owner/repo/pull/12",
+    "author": {"login": "teammate"},
+    "updatedAt": "2026-06-07T00:00:00Z",
+    "isDraft": false
+  }
+]`),
+	})
+
+	requests, err := client.ReviewRequests(context.Background(), "owner/repo")
+	if err != nil {
+		t.Fatalf("ReviewRequests returned error: %v", err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("got %d requests, want 1", len(requests))
+	}
+	request := requests[0]
+	if request.Key() != "owner/repo#12" {
+		t.Fatalf("key %q, want owner/repo#12", request.Key())
+	}
+	if request.Author != "teammate" || request.Title != "Need review" || request.IsDraft {
+		t.Fatalf("unexpected request: %#v", request)
+	}
+}
+
 func TestDecodePaginatedArray(t *testing.T) {
 	t.Parallel()
 
@@ -118,8 +162,8 @@ func TestDecodePaginatedArray(t *testing.T) {
 func eventsRunner() fakeRunner {
 	return fakeRunner{
 		"api repos/{owner}/{repo}/issues/123/comments --paginate --slurp": []byte(`[[{"id":1,"user":{"login":"reviewer"},"body":"conversation","html_url":"https://example.com/issue","created_at":"2026-06-06T10:00:00Z","updated_at":"2026-06-06T10:00:00Z"},{"id":2,"user":{"login":"me"},"body":"mine","html_url":"https://example.com/mine","created_at":"2026-06-06T10:01:00Z","updated_at":"2026-06-06T10:01:00Z"}]]`),
-		"api repos/{owner}/{repo}/pulls/123/comments --paginate --slurp":  []byte(`[[{"id":3,"user":{"login":"reviewer"},"body":"line","html_url":"https://example.com/review-comment","created_at":"2026-06-06T10:02:00Z","updated_at":"2026-06-06T10:02:00Z","path":"internal/user/profile.go","line":87,"side":"RIGHT","diff_hunk":"@@ -1 +1 @@"},{"id":5,"user":{"login":"me"},"body":"my line","html_url":"https://example.com/my-review-comment","created_at":"2026-06-06T10:03:00Z","updated_at":"2026-06-06T10:03:00Z","path":"internal/user/profile.go","line":88,"side":"RIGHT","diff_hunk":"@@ -1 +1 @@"}]]`),
-		"api repos/{owner}/{repo}/pulls/123/reviews --paginate --slurp":   []byte(`[[{"id":4,"user":{"login":"reviewer"},"body":"review","state":"COMMENTED","html_url":"https://example.com/review","submitted_at":"2026-06-06T10:04:00Z"},{"id":6,"user":{"login":"me"},"body":"my review","state":"COMMENTED","html_url":"https://example.com/my-review","submitted_at":"2026-06-06T10:05:00Z"}]]`),
+		"api repos/{owner}/{repo}/pulls/123/comments --paginate --slurp":  []byte(`[[{"id":3,"user":{"login":"reviewer"},"body":"line","html_url":"https://example.com/review-comment","created_at":"2026-06-06T10:02:00Z","updated_at":"2026-06-06T10:02:00Z","path":"internal/user/profile.go","line":87,"original_line":80,"side":"RIGHT","diff_hunk":"@@ -1 +1 @@","commit_id":"1111111111111111111111111111111111111111","original_commit_id":"2222222222222222222222222222222222222222"},{"id":5,"user":{"login":"me"},"body":"my line","html_url":"https://example.com/my-review-comment","created_at":"2026-06-06T10:03:00Z","updated_at":"2026-06-06T10:03:00Z","path":"internal/user/profile.go","line":88,"original_line":81,"side":"RIGHT","diff_hunk":"@@ -1 +1 @@","commit_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","original_commit_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]]`),
+		"api repos/{owner}/{repo}/pulls/123/reviews --paginate --slurp":   []byte(`[[{"id":4,"user":{"login":"reviewer"},"body":"review","state":"COMMENTED","html_url":"https://example.com/review","submitted_at":"2026-06-06T10:04:00Z","commit_id":"3333333333333333333333333333333333333333"},{"id":6,"user":{"login":"me"},"body":"my review","state":"COMMENTED","html_url":"https://example.com/my-review","submitted_at":"2026-06-06T10:05:00Z","commit_id":"cccccccccccccccccccccccccccccccccccccccc"}]]`),
 	}
 }
 

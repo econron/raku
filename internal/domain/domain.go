@@ -63,6 +63,20 @@ type Result struct {
 	Events        []Event `json:"events"`
 }
 
+type ReviewRequest struct {
+	Repo      string `json:"repo"`
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Author    string `json:"author"`
+	UpdatedAt string `json:"updated_at"`
+	IsDraft   bool   `json:"is_draft"`
+}
+
+func (r ReviewRequest) Key() string {
+	return fmt.Sprintf("%s#%d", r.Repo, r.Number)
+}
+
 func EventKey(eventType string, id int64) string {
 	return fmt.Sprintf("%s:%d", eventType, id)
 }

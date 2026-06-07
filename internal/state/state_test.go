@@ -18,7 +18,7 @@ func TestLoadMissingReturnsEmptyState(t *testing.T) {
 	if file.Version != Version {
 		t.Fatalf("version %d, want %d", file.Version, Version)
 	}
-	if file.Seen == nil || file.CurrentView == nil {
+	if file.Seen == nil || file.CurrentView == nil || file.Watch.ReviewRequests == nil {
 		t.Fatalf("state maps were not initialized: %#v", file)
 	}
 }

@@ -2,14 +2,21 @@ package cliapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
 	"raku/internal/app"
+	"raku/internal/config"
 	"raku/internal/gh"
+	"raku/internal/notify"
 	"raku/internal/output"
 	"raku/internal/state"
 )
@@ -21,11 +28,166 @@ func NewCommand(stdout, stderr io.Writer) *cli.Command {
 		Commands: []*cli.Command{
 			getCommand(stdout),
 			seenCommand(stdout),
+			configCommand(stdout),
+			watchCommand(stdout),
 		},
 		Writer:    stdout,
 		ErrWriter: stderr,
 	}
 	return cmd
+}
+
+func configCommand(stdout io.Writer) *cli.Command {
+	return &cli.Command{
+		Name:  "config",
+		Usage: "Manage raku config",
+		Commands: []*cli.Command{
+			{
+				Name:  "show",
+				Usage: "Show current config as JSON",
+				Action: func(context.Context, *cli.Command) error {
+					cfg, err := config.LoadOrDefault("")
+					if err != nil {
+						return err
+					}
+					encoder := json.NewEncoder(stdout)
+					encoder.SetIndent("", "  ")
+					return encoder.Encode(cfg)
+				},
+			},
+			{
+				Name:  "path",
+				Usage: "Show config file path",
+				Action: func(context.Context, *cli.Command) error {
+					path, err := config.DefaultPath()
+					if err != nil {
+						return err
+					}
+					fmt.Fprintln(stdout, path)
+					return nil
+				},
+			},
+			{
+				Name:  "watch",
+				Usage: "Manage watch config",
+				Commands: []*cli.Command{
+					{
+						Name:      "add-repo",
+						Usage:     "Add a repository to watch",
+						ArgsUsage: "owner/repo",
+						Action: func(_ context.Context, cmd *cli.Command) error {
+							if cmd.NArg() != 1 {
+								return errors.New("usage: raku config watch add-repo owner/repo")
+							}
+							cfg, err := config.LoadOrDefault("")
+							if err != nil {
+								return err
+							}
+							repo := cmd.Args().First()
+							if err := cfg.AddWatchRepository(repo); err != nil {
+								return err
+							}
+							if err := config.Save("", cfg); err != nil {
+								return err
+							}
+							fmt.Fprintf(stdout, "Added watch repository: %s\n", repo)
+							return nil
+						},
+					},
+					{
+						Name:      "remove-repo",
+						Usage:     "Remove a repository from watch config",
+						ArgsUsage: "owner/repo",
+						Action: func(_ context.Context, cmd *cli.Command) error {
+							if cmd.NArg() != 1 {
+								return errors.New("usage: raku config watch remove-repo owner/repo")
+							}
+							cfg, err := config.LoadOrDefault("")
+							if err != nil {
+								return err
+							}
+							repo := cmd.Args().First()
+							if err := cfg.RemoveWatchRepository(repo); err != nil {
+								return err
+							}
+							if err := config.Save("", cfg); err != nil {
+								return err
+							}
+							fmt.Fprintf(stdout, "Removed watch repository: %s\n", repo)
+							return nil
+						},
+					},
+					{
+						Name:      "set-interval",
+						Usage:     "Set watch interval",
+						ArgsUsage: "duration",
+						Action: func(_ context.Context, cmd *cli.Command) error {
+							if cmd.NArg() != 1 {
+								return errors.New("usage: raku config watch set-interval 30m")
+							}
+							cfg, err := config.LoadOrDefault("")
+							if err != nil {
+								return err
+							}
+							interval := cmd.Args().First()
+							if err := cfg.SetWatchInterval(interval); err != nil {
+								return err
+							}
+							if err := config.Save("", cfg); err != nil {
+								return err
+							}
+							fmt.Fprintf(stdout, "Set watch interval: %s\n", interval)
+							return nil
+						},
+					},
+					{
+						Name:  "list",
+						Usage: "List watch config",
+						Action: func(context.Context, *cli.Command) error {
+							cfg, err := config.LoadOrDefault("")
+							if err != nil {
+								return err
+							}
+							interval, err := cfg.WatchInterval("")
+							if err != nil {
+								return err
+							}
+							fmt.Fprintf(stdout, "interval: %s\n", interval)
+							if len(cfg.Watch.Repositories) == 0 {
+								fmt.Fprintln(stdout, "repositories: (none)")
+								return nil
+							}
+							fmt.Fprintln(stdout, "repositories:")
+							for _, repo := range cfg.Watch.Repositories {
+								fmt.Fprintf(stdout, "- %s\n", repo)
+							}
+							return nil
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func watchCommand(stdout io.Writer) *cli.Command {
+	return &cli.Command{
+		Name:  "watch",
+		Usage: "Watch resources",
+		Commands: []*cli.Command{
+			{
+				Name:  "review-request",
+				Usage: "Watch review requests for configured repositories",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "interval", Usage: "override watch interval, e.g. 30m or 1h"},
+					&cli.BoolFlag{Name: "once", Usage: "poll once and exit"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					return runWatchReviewRequest(ctx, stdout, cmd.String("interval"), cmd.Bool("once"))
+				},
+			},
+		},
+	}
 }
 
 func getCommand(stdout io.Writer) *cli.Command {
@@ -111,7 +273,90 @@ func newService() (*app.Service, error) {
 	}, nil
 }
 
+func newWatchService(stdout io.Writer) (*app.WatchService, error) {
+	statePath, err := state.DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return &app.WatchService{
+		GitHub:   gh.NewClient(nil),
+		State:    state.NewStore(statePath),
+		Notifier: notify.ReviewRequestNotifier{Writer: stdout},
+	}, nil
+}
+
+func runWatchReviewRequest(ctx context.Context, stdout io.Writer, intervalOverride string, once bool) error {
+	cfg, err := config.Load("")
+	if err != nil {
+		return formatError(err)
+	}
+	repos, err := cfg.WatchRepositories()
+	if err != nil {
+		return err
+	}
+	interval, err := cfg.WatchInterval(intervalOverride)
+	if err != nil {
+		return err
+	}
+
+	service, err := newWatchService(stdout)
+	if err != nil {
+		return err
+	}
+
+	watchCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	fmt.Fprintf(stdout, "Watching review requests for %d repo(s) every %s.\n", len(repos), interval)
+	if err := pollReviewRequests(watchCtx, stdout, service, repos); err != nil {
+		return formatError(err)
+	}
+	if once {
+		return nil
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-watchCtx.Done():
+			fmt.Fprintln(stdout, "Stopped watching review requests.")
+			return nil
+		case <-ticker.C:
+			if err := pollReviewRequests(watchCtx, stdout, service, repos); err != nil {
+				fmt.Fprintf(stdout, "watch error: %v\n", formatError(err))
+			}
+		}
+	}
+}
+
+func pollReviewRequests(ctx context.Context, stdout io.Writer, service *app.WatchService, repos []string) error {
+	result, err := service.PollReviewRequests(ctx, repos)
+	fmt.Fprintf(
+		stdout,
+		"checked %d repo(s): active=%d notified=%d cleared=%d\n",
+		result.CheckedRepos,
+		result.Active,
+		result.Notified,
+		result.Cleared,
+	)
+	return err
+}
+
 func formatError(err error) error {
+	var missingConfig *config.MissingError
+	if errors.As(err, &missingConfig) {
+		return fmt.Errorf(`raku config file was not found.
+
+Create it with:
+  raku config watch add-repo owner/repo
+  raku config watch set-interval 30m
+
+Config path:
+  %s`, missingConfig.Path)
+	}
+
 	var preflight *gh.PreflightError
 	if errors.As(err, &preflight) {
 		switch preflight.Kind {
