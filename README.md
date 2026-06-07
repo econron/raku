@@ -21,6 +21,22 @@ gh auth login -h github.com
 
 `raku get pr-comment` must be run from a GitHub repository checkout. It uses the current branch's PR via `gh pr view`.
 
+## Install / Update
+
+Install from the Homebrew tap:
+
+```bash
+brew update
+brew install econron/tap/raku
+```
+
+Update an existing installation:
+
+```bash
+brew update
+brew upgrade econron/tap/raku
+```
+
 ## Build
 
 ```bash
