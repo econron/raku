@@ -46,3 +46,19 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+
+brews:
+  - name: raku
+    ids:
+      - raku
+    repository:
+      owner: econron
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/econron/raku"
+    description: "GitHub PR review workflow helper"
+    license: MIT
+    test: |
+      system "#{bin}/raku", "--help"
